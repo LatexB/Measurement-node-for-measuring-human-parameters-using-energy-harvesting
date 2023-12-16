@@ -4,13 +4,25 @@
 #include <bluefruit.h>
 #include <Adafruit_FlashTransport.h>
 
+#include "MAX30105.h"
 #include <Wire.h>
 #define PCF8563_ADDRESS 0x51
+MAX30105 particleSensor;
 
 uint8_t cnt = 0u;
 
 void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(D2, OUTPUT);
+  digitalWrite(D2,HIGH);
+  delay(100);
+  particleSensor.begin(Wire, I2C_SPEED_FAST);
+  particleSensor.setup(0);
+  particleSensor.enableDIETEMPRDY();
+  
   Wire.begin(); 
+  delay(1000);
+  //suspendLoop();
   Wire.beginTransmission (PCF8563_ADDRESS);
   Wire.endTransmission();
    
@@ -34,16 +46,19 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-   delay(4000);
+  delay(1000);
   digitalWrite(LED_BUILTIN, LOW);
-  delay(4000);
+  delay(1000);
    digitalWrite(LED_BUILTIN, HIGH);
    cnt = cnt + 1u;
    if(cnt == 5u)
    { 
+    particleSensor.shutDown();
+    delay(100);
+    digitalWrite(D2,LOW);
+    delay(1000);
     shutdown();
    }
-
 }
 
 void sleepFlash() {
@@ -52,7 +67,9 @@ void sleepFlash() {
     flashTransport.begin();
     flashTransport.runCommand(0xB9);
     flashTransport.end();
+
 }
+/* DOES NOT WORK (?) */
 void disconnectPin(uint32_t ulPin) {
       if (ulPin >= PINS_COUNT) {
         return;
@@ -75,8 +92,9 @@ void shutdown() {
     cnt = 0u;
     sleepFlash();
     //disconnect any pins used
-    //disconnectPin(D1);
-    //disconnectPin(D2);
+    disconnectPin(D2);
+    disconnectPin(D4);
+    disconnectPin(D5);
     //setup pin for wakeup
     nrf_gpio_cfg_sense_input(g_ADigitalPinMap[D3], NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
     //power off

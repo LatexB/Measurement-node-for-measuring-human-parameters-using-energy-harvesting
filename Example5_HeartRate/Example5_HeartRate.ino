@@ -37,8 +37,6 @@ long lastBeat = 0; //Time at which the last beat occurred
 
 float beatsPerMinute;
 int beatAvg;
-int koniec;
-long irValue;
 
 void setup()
 {
@@ -60,19 +58,13 @@ void setup()
 
 void loop()
 {
-  //if(!koniec){
-    irValue = particleSensor.getIR();
-  //}
-  //else
-    //irValue = 0;
-  
+  long irValue = particleSensor.getIR();
 
   if (checkForBeat(irValue) == true)
   {
     //We sensed a beat!
     long delta = millis() - lastBeat;
     lastBeat = millis();
-    koniec = true;
 
     beatsPerMinute = 60 / (delta / 1000.0);
 
@@ -95,18 +87,9 @@ void loop()
   Serial.print(beatsPerMinute);
   Serial.print(", Avg BPM=");
   Serial.print(beatAvg);
-  Serial.print("koniec: ");
-  Serial.print(koniec);
 
-  if (irValue < 50000){
-        Serial.print(" No finger?");
-    koniec = 0;
-  }
-  else{
-    //particleSensor.shutDown();
-    koniec++;
-  }
-  
+  if (irValue < 50000)
+    Serial.print(" No finger?");
 
   Serial.println();
 }

@@ -4,7 +4,7 @@
 #define PCF8563_ADDRESS 0x51
 
 static PCF8563 RTC;
-
+bool flag = true;
 void setup()
 {
   RTC.begin();
@@ -14,7 +14,7 @@ void setup()
 
   Wire.beginTransmission(PCF8563_ADDRESS);
   Wire.write(0x0E);        // Address of register 0Eh
-  Wire.write(B10000011);   // for timer enable and a timer clock freq of 1/60 Hz
+  Wire.write(B10000010);   // for timer enable and a timer clock freq of 1/60 Hz
   Wire.endTransmission();
   
   Wire.beginTransmission(PCF8563_ADDRESS);
@@ -27,12 +27,22 @@ void setup()
   Wire.write(0x01); // Address of register 01h
   Wire.write(B00010001); // Control of Interrupt - 4 bit, 0 bit - timer interrupt is enable
   Wire.endTransmission();
-
+  pinMode (3, INPUT); // set pin to input
+  digitalWrite (3, HIGH); // turn on pullup resistors
+  Serial.begin(115200);
+  
 }
 
 
 void loop()
 {
-  
-}
- 
+  if(digitalRead(3) == LOW && flag){
+    Serial.println("Otrzymalem przerwanie");
+    //Serial.println(millis());
+    flag = false;
+  }
+  if(digitalRead(3) == HIGH){
+    flag = true; 
+  }
+
+  }
