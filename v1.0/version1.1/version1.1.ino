@@ -1,12 +1,16 @@
 #define PCF8563_ADDRESS 0x51
 
 #include <bluefruit.h>
+#include <Adafruit_LittleFS.h>
+#include <InternalFileSystem.h>
 #include <Adafruit_FlashTransport.h>
 #include "MAX30105.h"
 #include "heartRate.h"
 #include <Wire.h>
 
 MAX30105 Sensor;
+BLEDis  bledis;  // Initialization of Device Information Service
+BLEUart bleuart; // Initialization of UART for BLE
 
 uint8_t cnt = 0u;
 bool started_meas = false;
@@ -24,6 +28,10 @@ float tempSum;
 
 void configure_RTC();
 void configure_sensor();
+void configure_BLE();
+void start_Adv();
+void connect_callback(uint16_t conn_handle);
+void disconnect_callback(uint16_t conn_handle, uint8_t reason);
 void sleep_flash();
 void disconnect_pin(uint32_t ulPin);
 void shutdown();
@@ -33,6 +41,7 @@ void setup() {
   pinMode(D2, OUTPUT);
   digitalWrite(D2,HIGH); //Power for MAX sensor
   configure_RTC();
+  configure_BLE();
 }
 
 void loop() {
@@ -47,7 +56,6 @@ void loop() {
   tempSum += Sensor.readTemperature();
   tempCnt++; //Number of temperature measurments
   long irValue = Sensor.getIR();
-  delay(30);
   if (checkForBeat(irValue) == true)
   {
     //sensed a beat
@@ -68,7 +76,9 @@ void loop() {
       beatAvg /= RATE_SIZE;
     }
   }
-  Serial.print(" IR=");
+
+  /* DEBUG */
+  /*Serial.print(" IR=");
   Serial.print(irValue);
   Serial.print(" BPM=");
   Serial.print(beatsPerMinute);
@@ -76,7 +86,7 @@ void loop() {
   Serial.print(beatAvg); 
   if (irValue < 50000)
     Serial.print(" No finger?");
-  Serial.print('\n');
+  Serial.print('\n');*/
 
    digitalWrite(LED_BUILTIN, HIGH);
    cnt = cnt + 1u;
@@ -84,11 +94,13 @@ void loop() {
   //Check if 10secs elapsed
    if (millis()-t_start >= 10000)
    { 
-    Serial.println('\n');
-    Serial.print(" Avg BPM=");
+    //Serial.println('\n');
+    /*Serial.print(" Avg BPM=");
     Serial.print(beatAvg);
     Serial.print(" Avg TEMP=");
-    Serial.print(tempSum/tempCnt);
+    Serial.print(tempSum/tempCnt);*/
+    bleuart.printf("Temp: %.4f, BPM: %d\n", tempSum/tempCnt, beatAvg);
+    delay(200);
     
     /*DEBUG*/
     /*Serial.print(" Counter= ");
@@ -148,10 +160,77 @@ void configure_sensor(){
   Sensor.enableDIETEMPRDY(); //Enable the temp ready interrupt. This is required.
 }
 
+void configure_BLE(){
+  Bluefruit.autoConnLed(true);  //Set LED BLE to blink during advertising
+  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX); // BANDWIDTH_LOW, BANDWIDTH_NORMAL, BANDWIDTH_HIGH, BANDWIDTH_MAX 
+  Bluefruit.begin();  //All configs must be set before this line
+  
+  Bluefruit.setTxPower(1);  //default = 4
+  Bluefruit.Periph.setConnectCallback(connect_callback); //Function that will be performed after successfull connection
+  Bluefruit.Periph.setDisconnectCallback(disconnect_callback); //Function that will be executed after lost of connection
+  
+  bledis.setManufacturer("Adafruit Industries");  //Set name of industry
+  bledis.setModel("Bluefruit Feather52"); //Set name of device
+  bledis.begin();
+  
+  bleuart.begin();
+
+  start_Adv();
+  
+}
+
+void start_Adv(){
+  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);  //Add flags to adv packet
+  Bluefruit.Advertising.addTxPower(); //Add flags of TX power to adv packet
+  Bluefruit.Advertising.addService(bleuart);  //Add 128bit uuid addres
+  // Secondary Scan Response packet (optional)
+  // Since there is no room for 'Name' in Advertising packet
+  Bluefruit.ScanResponse.addName();
+  
+  /* Start Advertising
+   * - Enable auto advertising if disconnected
+   * - Interval:  fast mode = 20 ms, slow mode = 152.5 ms
+   * - Timeout for fast mode is 30 seconds
+   * - Start(timeout) with timeout = 0 will advertise forever (until connected)
+   * 
+   * For recommended advertising interval
+   * https://developer.apple.com/library/content/qa/qa1931/_index.html   
+   */
+  Bluefruit.Advertising.restartOnDisconnect(true);
+  Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
+  Bluefruit.Advertising.setFastTimeout(30);      // number of seconds in fast mode
+  Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds  
+}
+
+void connect_callback(uint16_t conn_handle){
+  // Get the reference to current connection
+  BLEConnection* connection = Bluefruit.Connection(conn_handle);
+
+  char central_name[32] = { 0 };
+  connection->getPeerName(central_name, sizeof(central_name));
+
+  Serial.print("Connected to ");
+  Serial.println(central_name);
+}
+
+/**
+ * Callback invoked when a connection is dropped
+ * @param conn_handle connection where this event happens
+ * @param reason is a BLE_HCI_STATUS_CODE which can be found in ble_hci.h
+ */
+void disconnect_callback(uint16_t conn_handle, uint8_t reason)
+{
+  (void) conn_handle;
+  (void) reason;
+
+  Serial.println();
+  Serial.print("Disconnected, reason = 0x"); Serial.println(reason, HEX);
+}
+
 
 void sleep_flash() {
     Adafruit_FlashTransport_QSPI flashTransport;
-    Bluefruit.begin();
+    //Bluefruit.begin();
     flashTransport.begin();
     flashTransport.runCommand(0xB9);
     flashTransport.end();
@@ -178,7 +257,7 @@ void disconnect_pin(uint32_t ulPin) {
 
 
 void shutdown() {
-    cnt = 0u;
+    cnt = 0u;  
     sleep_flash();
     //disconnect any pins used
     disconnect_pin(D2); //Control of transistor
