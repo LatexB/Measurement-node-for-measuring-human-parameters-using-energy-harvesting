@@ -19,6 +19,8 @@ long lastBeat = 0; //Time at which the last beat occurred
 
 float beatsPerMinute;
 int beatAvg;
+int tempCnt = 0;
+float tempSum;
 
 void configure_RTC();
 void configure_sensor();
@@ -29,33 +31,26 @@ void shutdown();
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(D2, OUTPUT);
-  digitalWrite(D2,HIGH);
-  //Serial.begin(115200);
+  digitalWrite(D2,HIGH); //Power for MAX sensor
   configure_RTC();
-  //configure_sensor();
-  
 }
 
-
 void loop() {
-  // put your main code here, to run repeatedly:
-  //delay(1000);
   if(!started_meas){
     Serial.begin(115200);
-     configure_sensor();
-     t_start = millis();
+    configure_sensor();
+    //t_start = millis(); //Debug
   }
   started_meas = true;
   digitalWrite(LED_BUILTIN, LOW);
-  float temperature = Sensor.readTemperature();
-  long irValue = Sensor.getIR();
-    
-  Serial.print("temperature= ");
-  Serial.print(temperature, 4);
   
+  tempSum += Sensor.readTemperature();
+  tempCnt++; //Number of temperature measurments
+  long irValue = Sensor.getIR();
+  delay(30);
   if (checkForBeat(irValue) == true)
   {
-    //We sensed a beat!
+    //sensed a beat
     long delta = millis() - lastBeat;
     lastBeat = millis();
 
@@ -73,28 +68,39 @@ void loop() {
       beatAvg /= RATE_SIZE;
     }
   }
-
   Serial.print(" IR=");
   Serial.print(irValue);
   Serial.print(" BPM=");
   Serial.print(beatsPerMinute);
   Serial.print(" Avg BPM=");
-  Serial.print(beatAvg);
-
+  Serial.print(beatAvg); 
   if (irValue < 50000)
     Serial.print(" No finger?");
-  
-  //delay(1000);
+  Serial.print('\n');
+
    digitalWrite(LED_BUILTIN, HIGH);
    cnt = cnt + 1u;
-   //Serial.print(" Counter= ");
-   //Serial.println(cnt);
-   //long t_stop = millis();
-   Serial.print(" czas= ");
-   Serial.println(millis()-t_start);
-   //if(cnt == 350u)
+
+  //Check if 10secs elapsed
    if (millis()-t_start >= 10000)
    { 
+    Serial.println('\n');
+    Serial.print(" Avg BPM=");
+    Serial.print(beatAvg);
+    Serial.print(" Avg TEMP=");
+    Serial.print(tempSum/tempCnt);
+    
+    /*DEBUG*/
+    /*Serial.print(" Counter= ");
+    Serial.print(cnt);
+    long t_stop = millis();
+    Serial.print(" czas= ");
+    Serial.print(millis()-t_start);
+    Serial.print("N of temp meas= ");
+    Serial.print(tempCnt);
+    Serial.print("Sum of temp=");
+    Serial.print(tempSum);*/
+    
     Sensor.shutDown();
     delay(100);
     digitalWrite(D2,LOW);
@@ -104,7 +110,8 @@ void loop() {
    }
 }
 
-void configure_RTC(){  Wire.begin(); 
+void configure_RTC(){
+  Wire.begin(); 
   delay(1000);
   Wire.beginTransmission (PCF8563_ADDRESS);
   Wire.endTransmission();
@@ -128,13 +135,11 @@ void configure_RTC(){  Wire.begin();
 
 
 void configure_sensor(){
-  // Initialize sensor
   if (Sensor.begin(Wire, I2C_SPEED_FAST) == false) //Use default I2C port, 400kHz speed
   {
     Serial.println("MAX30105 was not found. Please check wiring/power. ");
     while (1);
   }
-
   //Sensor.setup(0); //Configure sensor. Turn off LEDs
   Sensor.setup(); //Configure sensor. Use 25mA for LED drive
   Sensor.setPulseAmplitudeRed(0x0A); //Turn Red LED to low to indicate sensor is running
