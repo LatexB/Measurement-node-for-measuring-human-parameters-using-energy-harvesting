@@ -9,8 +9,14 @@
 #include <Wire.h>
 
 MAX30105 Sensor;
+BLEService  es_svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
+
+// GATT Characteristic and Object Type - 0x2A6E - Temperature
+BLECharacteristic tchar = BLECharacteristic(UUID16_CHR_TEMPERATURE);
+BLECharacteristic bchar = BLECharacteristic(UUID16_CHR_HEART_RATE_MEASUREMENT);
+
 BLEDis  bledis;  // Initialization of Device Information Service
-BLEUart bleuart; // Initialization of UART for BLE
+//BLEUart bleuart; // Initialization of UART for BLE, not in use anymore
 
 uint8_t cnt = 0u;
 bool started_meas = false;
@@ -23,11 +29,16 @@ long lastBeat = 0; //Time at which the last beat occurred
 
 float beatsPerMinute;
 int beatAvg;
+uint8_t BPMBLEData[2];
+
 int tempCnt = 0;
 float tempSum;
+float temp;
+uint8_t tempBLEData[4];
 
 void configure_RTC();
 void configure_sensor();
+void configure_ESS();
 void configure_BLE();
 void start_Adv();
 void connect_callback(uint16_t conn_handle);
@@ -91,16 +102,24 @@ void loop() {
    digitalWrite(LED_BUILTIN, HIGH);
    cnt = cnt + 1u;
 
-  //Check if 10secs elapsed
-   if (millis()-t_start >= 10000)
+  //Check if 3secs elapsed
+   if (millis()-t_start >= 3000)
    { 
     //Serial.println('\n');
     /*Serial.print(" Avg BPM=");
     Serial.print(beatAvg);
     Serial.print(" Avg TEMP=");
     Serial.print(tempSum/tempCnt);*/
-    bleuart.printf("Temp: %.4f, BPM: %d\n", tempSum/tempCnt, beatAvg);
+    
+    //bleuart.printf("Temp: %.4f, BPM: %d\n", tempSum/tempCnt, beatAvg);
+    temp = tempSum/tempCnt;
+    memcpy(tempBLEData, &temp, sizeof(temp));
+    beatAvg = random(60,120); //Debug purpose
+    memcpy(BPMBLEData, &beatAvg, sizeof(beatAvg));
+    
+    tchar.notify(tempBLEData, sizeof(tempBLEData));
     delay(200);
+    bchar.notify(BPMBLEData, sizeof(BPMBLEData));
     
     /*DEBUG*/
     /*Serial.print(" Counter= ");
@@ -112,13 +131,20 @@ void loop() {
     Serial.print(tempCnt);
     Serial.print("Sum of temp=");
     Serial.print(tempSum);*/
+
+    // Print the values to the Serial monitor for redundancy
+    Serial.print("tempBLEData: ");
+    Serial.println(temp, 2); // Print the float value with 3 digits precision
+    Serial.print("BPMBLEData: ");
+    Serial.println(beatAvg); // Print the int value
     
-    Sensor.shutDown();
+    //Sensor.shutDown(); //uncomment for turn off
     delay(100);
-    digitalWrite(D2,LOW);
-    started_meas = false;
+    //digitalWrite(D2,LOW); //uncomment for turn off
+    //started_meas = false; // uncomment for turn off
+    t_start = 0;
     delay(1000);
-    shutdown();
+    //shutdown(); //uncomment for turn off
    }
 }
 
@@ -160,50 +186,49 @@ void configure_sensor(){
   Sensor.enableDIETEMPRDY(); //Enable the temp ready interrupt. This is required.
 }
 
-void configure_BLE(){
-  Bluefruit.autoConnLed(true);  //Set LED BLE to blink during advertising
-  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX); // BANDWIDTH_LOW, BANDWIDTH_NORMAL, BANDWIDTH_HIGH, BANDWIDTH_MAX 
-  Bluefruit.begin();  //All configs must be set before this line
-  
-  Bluefruit.setTxPower(1);  //default = 4
-  Bluefruit.Periph.setConnectCallback(connect_callback); //Function that will be performed after successfull connection
-  Bluefruit.Periph.setDisconnectCallback(disconnect_callback); //Function that will be executed after lost of connection
-  
-  bledis.setManufacturer("Adafruit Industries");  //Set name of industry
-  bledis.setModel("Bluefruit Feather52"); //Set name of device
-  bledis.begin();
-  
-  bleuart.begin();
+void configure_ESS() {
+  es_svc.begin();
 
+  tchar.setProperties(CHR_PROPS_NOTIFY);
+  tchar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  tchar.setFixedLen(4);
+  tchar.begin();
+
+
+  bchar.setProperties(CHR_PROPS_NOTIFY);
+  bchar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  bchar.setFixedLen(2);
+  bchar.begin();
+
+}
+
+void configure_BLE(){
+  Bluefruit.begin();
+  Bluefruit.setName("BLEnergy VitaTrack");
+  Bluefruit.Periph.setConnectCallback(connect_callback);
+  Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
+
+  bledis.setManufacturer("BMB ENGINEERING");
+  bledis.setModel("NRF52840-MAX30102-PCF8563");
+  bledis.begin();
+
+  configure_ESS();
   start_Adv();
   
 }
 
 void start_Adv(){
-  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);  //Add flags to adv packet
-  Bluefruit.Advertising.addTxPower(); //Add flags of TX power to adv packet
-  Bluefruit.Advertising.addService(bleuart);  //Add 128bit uuid addres
-  // Secondary Scan Response packet (optional)
-  // Since there is no room for 'Name' in Advertising packet
-  Bluefruit.ScanResponse.addName();
-  
-  /* Start Advertising
-   * - Enable auto advertising if disconnected
-   * - Interval:  fast mode = 20 ms, slow mode = 152.5 ms
-   * - Timeout for fast mode is 30 seconds
-   * - Start(timeout) with timeout = 0 will advertise forever (until connected)
-   * 
-   * For recommended advertising interval
-   * https://developer.apple.com/library/content/qa/qa1931/_index.html   
-   */
+  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+  Bluefruit.Advertising.addTxPower();
+  Bluefruit.Advertising.addService(es_svc);
+  Bluefruit.Advertising.addName();
   Bluefruit.Advertising.restartOnDisconnect(true);
-  Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
-  Bluefruit.Advertising.setFastTimeout(30);      // number of seconds in fast mode
-  Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds  
+  Bluefruit.Advertising.setInterval(160, 1600);   // in unit of 0.625 ms
+  Bluefruit.Advertising.setFastTimeout(30);
+  Bluefruit.Advertising.start(0);
 }
 
 void connect_callback(uint16_t conn_handle){
-  // Get the reference to current connection
   BLEConnection* connection = Bluefruit.Connection(conn_handle);
 
   char central_name[32] = { 0 };
@@ -213,11 +238,6 @@ void connect_callback(uint16_t conn_handle){
   Serial.println(central_name);
 }
 
-/**
- * Callback invoked when a connection is dropped
- * @param conn_handle connection where this event happens
- * @param reason is a BLE_HCI_STATUS_CODE which can be found in ble_hci.h
- */
 void disconnect_callback(uint16_t conn_handle, uint8_t reason)
 {
   (void) conn_handle;
@@ -260,7 +280,7 @@ void shutdown() {
     cnt = 0u;  
     sleep_flash();
     //disconnect any pins used
-    disconnect_pin(D2); //Control of transistor
+    disconnect_pin(D2); //Control of GPIOVIN for MAX30102
     disconnect_pin(D4); //SDA
     disconnect_pin(D5); //SCL
     //setup pin for wakeup
