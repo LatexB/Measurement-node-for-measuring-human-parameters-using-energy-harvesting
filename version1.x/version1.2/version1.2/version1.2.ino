@@ -48,6 +48,7 @@ void disconnect_pin(uint32_t ulPin);
 void shutdown();
 
 void setup() {
+  Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(D2, OUTPUT);
   digitalWrite(D2,HIGH); //Power for MAX sensor
@@ -57,9 +58,9 @@ void setup() {
 
 void loop() {
   if(!started_meas){
-    Serial.begin(115200);
+    
     configure_sensor();
-    //t_start = millis(); //Debug
+    t_start = millis(); //Debug
   }
   started_meas = true;
   digitalWrite(LED_BUILTIN, LOW);
@@ -102,19 +103,19 @@ void loop() {
    digitalWrite(LED_BUILTIN, HIGH);
    cnt = cnt + 1u;
 
-  //Check if 3secs elapsed
-   if (millis()-t_start >= 3000)
+  //Check if 10secs elapsed
+   if (millis()-t_start >= 10000)
    { 
     //Serial.println('\n');
-    /*Serial.print(" Avg BPM=");
+    Serial.print(" Avg BPM=");
     Serial.print(beatAvg);
     Serial.print(" Avg TEMP=");
-    Serial.print(tempSum/tempCnt);*/
+    Serial.println(tempSum/tempCnt);
     
     //bleuart.printf("Temp: %.4f, BPM: %d\n", tempSum/tempCnt, beatAvg);
     temp = tempSum/tempCnt;
     memcpy(tempBLEData, &temp, sizeof(temp));
-    beatAvg = random(60,120); //Debug purpose
+    //beatAvg = random(60,120); //Debug purpose
     memcpy(BPMBLEData, &beatAvg, sizeof(beatAvg));
     
     tchar.notify(tempBLEData, sizeof(tempBLEData));
@@ -133,17 +134,17 @@ void loop() {
     Serial.print(tempSum);*/
 
     // Print the values to the Serial monitor for redundancy
-    Serial.print("tempBLEData: ");
-    Serial.println(temp, 2); // Print the float value with 3 digits precision
-    Serial.print("BPMBLEData: ");
-    Serial.println(beatAvg); // Print the int value
+    //Serial.print("tempBLEData: ");
+    //Serial.println(temp, 2); // Print the float value with 3 digits precision
+    //Serial.print("BPMBLEData: ");
+    //Serial.println(beatAvg); // Print the int value
     
     //Sensor.shutDown(); //uncomment for turn off
     delay(100);
     //digitalWrite(D2,LOW); //uncomment for turn off
-    //started_meas = false; // uncomment for turn off
+    started_meas = false; // uncomment for turn off
     t_start = 0;
-    delay(1000);
+    //delay(1000);
     //shutdown(); //uncomment for turn off
    }
 }
