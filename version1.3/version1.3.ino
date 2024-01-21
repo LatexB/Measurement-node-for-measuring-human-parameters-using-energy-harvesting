@@ -2,7 +2,6 @@
 
 #include <bluefruit.h>
 #include <Adafruit_LittleFS.h>
-#include <InternalFileSystem.h>
 #include <Adafruit_FlashTransport.h>
 #include "MAX30105.h"
 #include "heartRate.h"
@@ -16,9 +15,8 @@ BLECharacteristic tchar = BLECharacteristic(UUID16_CHR_TEMPERATURE);
 BLECharacteristic bchar = BLECharacteristic(UUID16_CHR_HEART_RATE_MEASUREMENT);
 
 BLEDis  bledis;  // Initialization of Device Information Service
-//BLEUart bleuart; // Initialization of UART for BLE, not in use anymore
 
-uint8_t cnt = 0u;
+// Control of deep sleep
 bool started_meas = false;
 long t_start;
 
@@ -27,10 +25,14 @@ byte rates[RATE_SIZE]; //Array of heart rates
 byte rateSpot = 0;
 long lastBeat = 0; //Time at which the last beat occurred
 
+// Data of BPM
 float beatsPerMinute;
 int beatAvg;
+int beatAbove;
+int nBeatAbove;
 uint8_t BPMBLEData[2];
 
+//Data of temperature
 int tempCnt = 0;
 float tempSum;
 float temp;
@@ -40,7 +42,7 @@ void configure_RTC();
 void configure_sensor();
 void configure_ESS();
 void configure_BLE();
-void start_Adv();
+void start_adv();
 void connect_callback(uint16_t conn_handle);
 void disconnect_callback(uint16_t conn_handle, uint8_t reason);
 void sleep_flash();
@@ -58,15 +60,21 @@ void setup() {
 
 void loop() {
   if(!started_meas){
-    
     configure_sensor();
-    t_start = millis(); //Debug
+    // Reset to default values
+    tempSum = 0;
+    tempCnt = 0;
+    beatAbove = 0;
+    nBeatAbove = 0;
+    t_start = millis(); 
   }
-  started_meas = true;
   digitalWrite(LED_BUILTIN, LOW);
+  started_meas = true;
   
   tempSum += Sensor.readTemperature();
   tempCnt++; //Number of temperature measurments
+  
+  // Measure BPM
   long irValue = Sensor.getIR();
   if (checkForBeat(irValue) == true)
   {
@@ -87,65 +95,39 @@ void loop() {
         beatAvg += rates[x];
       beatAvg /= RATE_SIZE;
     }
+    //Filter useless readings
+    if (beatAvg>55){
+      beatAbove+=beatAvg;
+      nBeatAbove++;
+    }
   }
-
-  /* DEBUG */
-  /*Serial.print(" IR=");
-  Serial.print(irValue);
-  Serial.print(" BPM=");
-  Serial.print(beatsPerMinute);
-  Serial.print(" Avg BPM=");
-  Serial.print(beatAvg); 
-  if (irValue < 50000)
-    Serial.print(" No finger?");
-  Serial.print('\n');*/
-
-   digitalWrite(LED_BUILTIN, HIGH);
-   cnt = cnt + 1u;
-
-  //Check if 10secs elapsed
-   if (millis()-t_start >= 10000)
+  digitalWrite(LED_BUILTIN, HIGH);
+  //Check if 30secs elapsed
+   if (millis()-t_start >= 30000)
    { 
-    //Serial.println('\n');
     Serial.print(" Avg BPM=");
-    Serial.print(beatAvg);
+    Serial.print(beatAbove/nBeatAbove);
     Serial.print(" Avg TEMP=");
     Serial.println(tempSum/tempCnt);
-    
-    //bleuart.printf("Temp: %.4f, BPM: %d\n", tempSum/tempCnt, beatAvg);
+
     temp = tempSum/tempCnt;
+    beatAvg = beatAbove/nBeatAbove;
     memcpy(tempBLEData, &temp, sizeof(temp));
-    //beatAvg = random(60,120); //Debug purpose
     memcpy(BPMBLEData, &beatAvg, sizeof(beatAvg));
-    
+
+    // Send data BLE
     tchar.notify(tempBLEData, sizeof(tempBLEData));
     delay(200);
     bchar.notify(BPMBLEData, sizeof(BPMBLEData));
-    
-    /*DEBUG*/
-    /*Serial.print(" Counter= ");
-    Serial.print(cnt);
-    long t_stop = millis();
-    Serial.print(" czas= ");
-    Serial.print(millis()-t_start);
-    Serial.print("N of temp meas= ");
-    Serial.print(tempCnt);
-    Serial.print("Sum of temp=");
-    Serial.print(tempSum);*/
 
-    // Print the values to the Serial monitor for redundancy
-    //Serial.print("tempBLEData: ");
-    //Serial.println(temp, 2); // Print the float value with 3 digits precision
-    //Serial.print("BPMBLEData: ");
-    //Serial.println(beatAvg); // Print the int value
-    
-    //Sensor.shutDown(); //uncomment for turn off
+    // Go to deep sleep mode
+    Sensor.shutDown(); 
     delay(100);
-    //digitalWrite(D2,LOW); //uncomment for turn off
-    started_meas = false; // uncomment for turn off
+    digitalWrite(D2,LOW); 
+    started_meas = false; 
     t_start = 0;
-    //delay(1000);
-    //shutdown(); //uncomment for turn off
+    delay(1000);
+    shutdown(); 
    }
 }
 
@@ -179,7 +161,6 @@ void configure_sensor(){
     Serial.println("MAX30105 was not found. Please check wiring/power. ");
     while (1);
   }
-  //Sensor.setup(0); //Configure sensor. Turn off LEDs
   Sensor.setup(); //Configure sensor. Use 25mA for LED drive
   Sensor.setPulseAmplitudeRed(0x0A); //Turn Red LED to low to indicate sensor is running
   Sensor.setPulseAmplitudeGreen(0); //Turn off Green LED
@@ -187,15 +168,16 @@ void configure_sensor(){
   Sensor.enableDIETEMPRDY(); //Enable the temp ready interrupt. This is required.
 }
 
+// Set required properties to BLE characteristics
 void configure_ESS() {
   es_svc.begin();
-
+  // Temperature
   tchar.setProperties(CHR_PROPS_NOTIFY);
   tchar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
   tchar.setFixedLen(4);
   tchar.begin();
 
-
+  // BPM
   bchar.setProperties(CHR_PROPS_NOTIFY);
   bchar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
   bchar.setFixedLen(2);
@@ -214,11 +196,11 @@ void configure_BLE(){
   bledis.begin();
 
   configure_ESS();
-  start_Adv();
+  start_adv();
   
 }
 
-void start_Adv(){
+void start_adv(){
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
   Bluefruit.Advertising.addService(es_svc);
@@ -248,22 +230,19 @@ void disconnect_callback(uint16_t conn_handle, uint8_t reason)
   Serial.print("Disconnected, reason = 0x"); Serial.println(reason, HEX);
 }
 
-
+// Turn off internal flash, to lower power consumption during sleep
 void sleep_flash() {
     Adafruit_FlashTransport_QSPI flashTransport;
-    //Bluefruit.begin();
     flashTransport.begin();
     flashTransport.runCommand(0xB9);
     flashTransport.end();
 }
 
 
-/* DOES NOT WORK (?) */
 void disconnect_pin(uint32_t ulPin) {
       if (ulPin >= PINS_COUNT) {
         return;
     }
-
     ulPin = g_ADigitalPinMap[ulPin];
 
     NRF_GPIO_Type * port = nrf_gpio_pin_port_decode(&ulPin);
@@ -276,9 +255,7 @@ void disconnect_pin(uint32_t ulPin) {
         | ((uint32_t)GPIO_PIN_CNF_SENSE_Disabled   << GPIO_PIN_CNF_SENSE_Pos);
 }
 
-
-void shutdown() {
-    cnt = 0u;  
+void shutdown() { 
     sleep_flash();
     //disconnect any pins used
     disconnect_pin(D2); //Control of GPIOVIN for MAX30102
